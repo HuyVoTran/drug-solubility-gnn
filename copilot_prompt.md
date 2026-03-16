@@ -164,12 +164,9 @@ Google Colab:
 * !python train.py
 * !python test.py
 
-git init
-git remote add origin https://github.com/HuyVoTran/drug-solubility-gnn
 git add .
 git commit -m "Initial commit - drug solubility GNN project"
-git branch -M main
-git push -u origin main
+git push
 
 !git clone https://github.com/HuyVoTran/drug-solubility-gnn
 %cd drug-solubility-gnn
