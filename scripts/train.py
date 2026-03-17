@@ -142,8 +142,8 @@ def evaluate_epoch(model, loader, criterion, device="cpu", accuracy_threshold=0.
 def save_loss_plot(train_losses, val_losses, output_path: Path):
     epochs = range(1, len(train_losses) + 1)
     plt.figure(figsize=(8, 5))
-    plt.plot(epochs, train_losses, label="Train Loss (MSE)", linewidth=2)
-    plt.plot(epochs, val_losses, label="Validation Loss (MSE)", linewidth=2)
+    plt.plot(epochs, train_losses, label="Train Loss (MAE)", color="#1f77b4", linewidth=2)
+    plt.plot(epochs, val_losses, label="Validation Loss (MAE)", color="#ff7f0e", linewidth=2)
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.title("Train vs Validation Loss")
@@ -157,8 +157,9 @@ def save_loss_plot(train_losses, val_losses, output_path: Path):
 def save_accuracy_plot(train_accuracies, val_accuracies, output_path: Path):
     epochs = range(1, len(train_accuracies) + 1)
     plt.figure(figsize=(8, 5))
-    plt.plot(epochs, train_accuracies, label="Train Accuracy", linewidth=2)
-    plt.plot(epochs, val_accuracies, label="Validation Accuracy", linewidth=2)
+    plt.plot(epochs, train_accuracies, label="Train Accuracy", color="#1f77b4", linewidth=2, linestyle="-")
+    plt.plot(epochs, val_accuracies, label="Validation Accuracy", color="#ff7f0e", linewidth=2, linestyle="-")
+    # Đánh dấu vùng overlap (nếu muốn, có thể thêm fill_between)
     plt.xlabel("Epoch")
     plt.ylabel("Accuracy")
     plt.title("Train vs Validation Accuracy")
