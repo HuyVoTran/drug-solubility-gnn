@@ -261,7 +261,7 @@ def main(
 
     optimizer = Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
     scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5)
-    criterion = nn.MSELoss()
+    criterion = nn.HuberLoss()
 
     best_val_loss = float("inf")
     best_epoch = 0
