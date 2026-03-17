@@ -19,7 +19,13 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
+
+# Detect Colab
+IS_COLAB = "COLAB_GPU" in os.environ or "google.colab" in sys.modules
+if IS_COLAB:
+    ROOT_DIR = Path(".")
+else:
+    ROOT_DIR = Path(__file__).resolve().parents[1]
 SRC_DIR = ROOT_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
@@ -34,23 +40,41 @@ from drug_solubility_gnn.metrics import compute_accuracy  # noqa: E402
 from drug_solubility_gnn.model import GATRegressor  # noqa: E402
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Train GAT model for aqueous solubility prediction")
-    parser.add_argument("--data-path", type=str, default=str(ROOT_DIR / "curated-solubility-dataset.csv"))
-    parser.add_argument("--epochs", type=int, default=150)
-    parser.add_argument("--learning-rate", type=float, default=1e-3)
-    parser.add_argument("--weight-decay", type=float, default=1e-4)
-    parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--hidden-dim", type=int, default=128)
-    parser.add_argument("--num-layers", type=int, default=3)
-    parser.add_argument("--heads", type=int, default=4)
-    parser.add_argument("--dropout", type=float, default=0.15)
-    parser.add_argument("--patience", type=int, default=15)
-    parser.add_argument("--min-epochs-before-stop", type=int, default=100)
-    parser.add_argument("--num-workers", type=int, default=0)
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--accuracy-threshold", type=float, default=0.5)
-    return parser.parse_args()
+
+def get_args_colab(
+    data_path="curated-solubility-dataset.csv",
+    epochs=150,
+    learning_rate=1e-3,
+    weight_decay=1e-4,
+    batch_size=32,
+    hidden_dim=128,
+    num_layers=3,
+    heads=4,
+    dropout=0.15,
+    patience=15,
+    min_epochs_before_stop=100,
+    num_workers=0,
+    seed=42,
+    accuracy_threshold=0.5,
+):
+    class Args:
+        pass
+    args = Args()
+    args.data_path = data_path
+    args.epochs = epochs
+    args.learning_rate = learning_rate
+    args.weight_decay = weight_decay
+    args.batch_size = batch_size
+    args.hidden_dim = hidden_dim
+    args.num_layers = num_layers
+    args.heads = heads
+    args.dropout = dropout
+    args.patience = patience
+    args.min_epochs_before_stop = min_epochs_before_stop
+    args.num_workers = num_workers
+    args.seed = seed
+    args.accuracy_threshold = accuracy_threshold
+    return args
 
 
 def set_seed(seed: int):
@@ -145,8 +169,56 @@ def save_accuracy_plot(train_accuracies, val_accuracies, output_path: Path):
     plt.close()
 
 
-def main():
-    args = parse_args()
+def main(
+    data_path=None,
+    epochs=None,
+    learning_rate=None,
+    weight_decay=None,
+    batch_size=None,
+    hidden_dim=None,
+    num_layers=None,
+    heads=None,
+    dropout=None,
+    patience=None,
+    min_epochs_before_stop=None,
+    num_workers=None,
+    seed=None,
+    accuracy_threshold=None,
+):
+    if IS_COLAB:
+        args = get_args_colab(
+            data_path=data_path or "curated-solubility-dataset.csv",
+            epochs=epochs or 150,
+            learning_rate=learning_rate or 1e-3,
+            weight_decay=weight_decay or 1e-4,
+            batch_size=batch_size or 32,
+            hidden_dim=hidden_dim or 128,
+            num_layers=num_layers or 3,
+            heads=heads or 4,
+            dropout=dropout or 0.15,
+            patience=patience or 15,
+            min_epochs_before_stop=min_epochs_before_stop or 100,
+            num_workers=num_workers or 0,
+            seed=seed or 42,
+            accuracy_threshold=accuracy_threshold or 0.5,
+        )
+    else:
+        parser = argparse.ArgumentParser(description="Train GAT model for aqueous solubility prediction")
+        parser.add_argument("--data-path", type=str, default=str(ROOT_DIR / "curated-solubility-dataset.csv"))
+        parser.add_argument("--epochs", type=int, default=150)
+        parser.add_argument("--learning-rate", type=float, default=1e-3)
+        parser.add_argument("--weight-decay", type=float, default=1e-4)
+        parser.add_argument("--batch-size", type=int, default=32)
+        parser.add_argument("--hidden-dim", type=int, default=128)
+        parser.add_argument("--num-layers", type=int, default=3)
+        parser.add_argument("--heads", type=int, default=4)
+        parser.add_argument("--dropout", type=float, default=0.15)
+        parser.add_argument("--patience", type=int, default=15)
+        parser.add_argument("--min-epochs-before-stop", type=int, default=100)
+        parser.add_argument("--num-workers", type=int, default=0)
+        parser.add_argument("--seed", type=int, default=42)
+        parser.add_argument("--accuracy-threshold", type=float, default=0.5)
+        args = parser.parse_args()
     set_seed(args.seed)
 
     os.makedirs(ROOT_DIR / "models", exist_ok=True)
