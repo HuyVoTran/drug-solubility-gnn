@@ -44,14 +44,14 @@ from drug_solubility_gnn.model import GATRegressor  # noqa: E402
 def get_args_colab(
     data_path="curated-solubility-dataset.csv",
     epochs=150,
-    learning_rate=5e-4,           # Giảm learning rate
-    weight_decay=1e-3,            # Tăng regularization
-    batch_size=32,
-    hidden_dim=64,                # Giảm độ phức tạp mô hình
-    num_layers=2,                 # Giảm số layer
+    learning_rate=2e-4,           # Giảm learning rate hơn nữa
+    weight_decay=2e-3,            # Tăng regularization mạnh hơn
+    batch_size=64,                # Tăng batch size
+    hidden_dim=32,                # Giảm độ phức tạp mô hình thêm nữa
+    num_layers=2,                 # Giữ số layer thấp
     heads=4,
-    dropout=0.4,                  # Tăng dropout
-    patience=25,                  # Tăng patience
+    dropout=0.5,                  # Tăng dropout mạnh
+    patience=35,                  # Tăng patience
     min_epochs_before_stop=100,
     num_workers=0,
     seed=42,
