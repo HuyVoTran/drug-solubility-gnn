@@ -1,34 +1,82 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import random
 import sys
 from pathlib import Path
 
+import matplotlib
 import numpy as np
 import torch
 from torch import nn
-from torch.optim import AdamW
+from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch_geometric.loader import DataLoader
 
-# ===== Setup paths =====
-ROOT_DIR = Path(__file__).resolve().parents[1]
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+
+
+# Detect Colab
+IS_COLAB = "COLAB_GPU" in os.environ or "google.colab" in sys.modules
+if IS_COLAB:
+    ROOT_DIR = Path(".")
+else:
+    ROOT_DIR = Path(__file__).resolve().parents[1]
 SRC_DIR = ROOT_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from drug_solubility_gnn.data_utils import (
+from drug_solubility_gnn.data_utils import (  # noqa: E402
     build_graph_dataset,
     create_data_splits,
     get_split_datasets,
     load_raw_dataset,
 )
-from drug_solubility_gnn.model import GATRegressor
+from drug_solubility_gnn.metrics import compute_accuracy  # noqa: E402
+from drug_solubility_gnn.model import GATRegressor  # noqa: E402
 
 
-# ===== Utils =====
+
+def get_args_colab(
+    data_path="curated-solubility-dataset.csv",
+    epochs=150,
+    learning_rate=5e-4,           # Mức hợp lý
+    weight_decay=1e-3,            # Mức hợp lý
+    batch_size=64,                # Mức hợp lý
+    hidden_dim=32,                # Mức hợp lý
+    num_layers=2,                 # Mức hợp lý
+    heads=4,
+    dropout=0.4,                  # Mức hợp lý
+    patience=25,                  # Mức hợp lý
+    min_epochs_before_stop=100,
+    num_workers=0,
+    seed=42,
+    accuracy_threshold=0.5,
+):
+    class Args:
+        pass
+    args = Args()
+    args.data_path = data_path
+    args.epochs = epochs
+    args.learning_rate = learning_rate
+    args.weight_decay = weight_decay
+    args.batch_size = batch_size
+    args.hidden_dim = hidden_dim
+    args.num_layers = num_layers
+    args.heads = heads
+    args.dropout = dropout
+    args.patience = patience
+    args.min_epochs_before_stop = min_epochs_before_stop
+    args.num_workers = num_workers
+    args.seed = seed
+    args.accuracy_threshold = accuracy_threshold
+    return args
+
+
 def set_seed(seed: int):
     random.seed(seed)
     np.random.seed(seed)
@@ -37,115 +85,172 @@ def set_seed(seed: int):
         torch.cuda.manual_seed_all(seed)
 
 
-def compute_metrics(y_true, y_pred):
-    y_true = np.array(y_true)
-    y_pred = np.array(y_pred)
-
-    mae = np.mean(np.abs(y_true - y_pred))
-    rmse = np.sqrt(np.mean((y_true - y_pred) ** 2))
-
-    ss_res = np.sum((y_true - y_pred) ** 2)
-    ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
-    r2 = 1 - ss_res / ss_tot if ss_tot != 0 else 0
-
-    return mae, rmse, r2
-
-
-# ===== Train =====
-def train_one_epoch(model, loader, criterion, optimizer, device):
+def train_one_epoch(model, loader, criterion, optimizer, device="cpu"):
     model.train()
-    total_loss = 0
+
+    total_loss = 0.0
+    total_graphs = 0
 
     for batch in loader:
         batch = batch.to(device)
+
         optimizer.zero_grad()
 
-        out = model(batch)
-        loss = criterion(out, batch.y.view(-1))
+        outputs = model(batch)
+        targets = batch.y.view(-1)
+        loss = criterion(outputs, targets)
 
         loss.backward()
-
-        # 🔥 FIX 1: Gradient Clipping
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 2.0)
-
         optimizer.step()
 
-        total_loss += loss.item() * batch.num_graphs
+        batch_graphs = batch.num_graphs
+        total_loss += float(loss.item()) * batch_graphs
+        total_graphs += batch_graphs
 
-    return total_loss / len(loader.dataset)
+    return total_loss / max(total_graphs, 1)
 
 
-# ===== Evaluate =====
-def evaluate(model, loader, criterion, device, y_mean, y_std):
+def evaluate_epoch(model, loader, criterion, device="cpu", accuracy_threshold=0.5):
     model.eval()
-    total_loss = 0
 
-    all_preds = []
-    all_targets = []
+    total_loss = 0.0
+    total_graphs = 0
+    total_correct = 0.0
 
     with torch.no_grad():
         for batch in loader:
             batch = batch.to(device)
-            out = model(batch)
+            outputs = model(batch)
+            targets = batch.y.view(-1)
+            loss = criterion(outputs, targets)
 
-            loss = criterion(out, batch.y.view(-1))
-            total_loss += loss.item() * batch.num_graphs
+            batch_graphs = batch.num_graphs
+            total_loss += float(loss.item()) * batch_graphs
+            total_graphs += batch_graphs
+            batch_accuracy = compute_accuracy(
+                y_true=targets.detach().cpu().numpy(),
+                y_pred=outputs.detach().cpu().numpy(),
+                threshold=accuracy_threshold,
+            )
+            total_correct += batch_accuracy * batch_graphs
 
-            # 🔥 Denormalize
-            preds = out.cpu().numpy() * y_std + y_mean
-            targets = batch.y.view(-1).cpu().numpy() * y_std + y_mean
-
-            all_preds.extend(preds)
-            all_targets.extend(targets)
-
-    mae, rmse, r2 = compute_metrics(all_targets, all_preds)
-
-    return total_loss / len(loader.dataset), mae, rmse, r2
+    epoch_loss = total_loss / max(total_graphs, 1)
+    epoch_accuracy = total_correct / max(total_graphs, 1)
+    return epoch_loss, epoch_accuracy
 
 
-# ===== Main =====
-def main():
-    parser = argparse.ArgumentParser()
+def save_loss_plot(train_losses, val_losses, output_path: Path):
+    epochs = range(1, len(train_losses) + 1)
+    plt.figure(figsize=(8, 5))
+    plt.plot(epochs, train_losses, label="Train Loss (MAE)", color="#1f77b4", linewidth=2)
+    plt.plot(epochs, val_losses, label="Validation Loss (MAE)", color="#ff7f0e", linewidth=2)
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title("Train vs Validation Loss")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
 
-    # 🔥 FIX 2: Better config (QUAN TRỌNG)
-    parser.add_argument("--epochs", type=int, default=300)
-    parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--lr", type=float, default=5e-4)
-    parser.add_argument("--weight-decay", type=float, default=5e-4)
-    parser.add_argument("--hidden-dim", type=int, default=128)
-    parser.add_argument("--num-layers", type=int, default=4)
-    parser.add_argument("--heads", type=int, default=8)
-    parser.add_argument("--dropout", type=float, default=0.3)
-    parser.add_argument("--patience", type=int, default=15)
-    parser.add_argument("--seed", type=int, default=42)
 
-    args = parser.parse_args()
+def save_accuracy_plot(train_accuracies, val_accuracies, output_path: Path):
+    epochs = range(1, len(train_accuracies) + 1)
+    plt.figure(figsize=(8, 5))
+    plt.plot(epochs, train_accuracies, label="Train Accuracy", color="#1f77b4", linewidth=2, linestyle="-")
+    plt.plot(epochs, val_accuracies, label="Validation Accuracy", color="#ff7f0e", linewidth=2, linestyle="-")
+    # Đánh dấu vùng overlap (nếu muốn, có thể thêm fill_between)
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.title("Train vs Validation Accuracy")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
 
+
+def main(
+    data_path=None,
+    epochs=None,
+    learning_rate=None,
+    weight_decay=None,
+    batch_size=None,
+    hidden_dim=None,
+    num_layers=None,
+    heads=None,
+    dropout=None,
+    patience=None,
+    min_epochs_before_stop=None,
+    num_workers=None,
+    seed=None,
+    accuracy_threshold=None,
+):
+    if IS_COLAB:
+        args = get_args_colab(
+            data_path=data_path or "curated-solubility-dataset.csv",
+            epochs=epochs or 150,
+            learning_rate=learning_rate or 1e-3,
+            weight_decay=weight_decay or 1e-4,
+            batch_size=batch_size or 32,
+            hidden_dim=hidden_dim or 128,
+            num_layers=num_layers or 3,
+            heads=heads or 4,
+            dropout=dropout or 0.15,
+            patience=patience or 15,
+            min_epochs_before_stop=min_epochs_before_stop or 100,
+            num_workers=num_workers or 0,
+            seed=seed or 42,
+            accuracy_threshold=accuracy_threshold or 0.5,
+        )
+    else:
+        parser = argparse.ArgumentParser(description="Train GAT model for aqueous solubility prediction")
+        parser.add_argument("--data-path", type=str, default=str(ROOT_DIR / "curated-solubility-dataset.csv"))
+        parser.add_argument("--epochs", type=int, default=150)
+        parser.add_argument("--learning-rate", type=float, default=1e-3)
+        parser.add_argument("--weight-decay", type=float, default=1e-4)
+        parser.add_argument("--batch-size", type=int, default=32)
+        parser.add_argument("--hidden-dim", type=int, default=128)
+        parser.add_argument("--num-layers", type=int, default=3)
+        parser.add_argument("--heads", type=int, default=4)
+        parser.add_argument("--dropout", type=float, default=0.15)
+        parser.add_argument("--patience", type=int, default=15)
+        parser.add_argument("--min-epochs-before-stop", type=int, default=100)
+        parser.add_argument("--num-workers", type=int, default=0)
+        parser.add_argument("--seed", type=int, default=42)
+        parser.add_argument("--accuracy-threshold", type=float, default=0.5)
+        args = parser.parse_args()
     set_seed(args.seed)
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    os.makedirs(ROOT_DIR / "models", exist_ok=True)
+    os.makedirs(ROOT_DIR / "results", exist_ok=True)
+    os.makedirs(ROOT_DIR / "plots", exist_ok=True)
 
-    # ===== Load data =====
-    raw_df = load_raw_dataset(ROOT_DIR / "curated-solubility-dataset.csv")
-
-    y_mean = raw_df["solubility"].mean()
-    y_std = raw_df["solubility"].std()
-    raw_df["solubility"] = (raw_df["solubility"] - y_mean) / y_std
-
+    raw_df = load_raw_dataset(args.data_path)
     graph_data_list, _ = build_graph_dataset(raw_df)
     split_indices = create_data_splits(graph_data_list, seed=args.seed)
-    train_dataset, val_dataset, test_dataset = get_split_datasets(
-        graph_data_list, split_indices
+    train_dataset, val_dataset, test_dataset = get_split_datasets(graph_data_list, split_indices)
+
+    pin_memory = torch.cuda.is_available()
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=args.num_workers,
+        pin_memory=pin_memory,
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+        pin_memory=pin_memory,
     )
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
-
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     sample = graph_data_list[0]
-    edge_dim = sample.edge_attr.size(-1) if sample.edge_attr is not None else 0
+    edge_dim = int(sample.edge_attr.size(-1)) if sample.edge_attr.numel() > 0 else 0
 
-    # ===== Model =====
     model = GATRegressor(
         in_channels=sample.num_node_features,
         edge_dim=edge_dim,
@@ -155,70 +260,119 @@ def main():
         dropout=args.dropout,
     ).to(device)
 
-    optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-
-    # 🔥 FIX 3: Better scheduler
-    scheduler = ReduceLROnPlateau(
-        optimizer,
-        mode="min",
-        factor=0.5,
-        patience=3,
-        min_lr=1e-5,
-    )
-
-    criterion = nn.SmoothL1Loss()
-
-    os.makedirs(ROOT_DIR / "models", exist_ok=True)
+    optimizer = Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5)
+    criterion = nn.L1Loss()
 
     best_val_loss = float("inf")
+    best_epoch = 0
     patience_counter = 0
+    optimization_losses = []
+    train_losses = []
+    val_losses = []
+    train_accuracies = []
+    val_accuracies = []
 
-    # ===== Training =====
     for epoch in range(1, args.epochs + 1):
-        train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device)
-
-        val_loss, val_mae, val_rmse, val_r2 = evaluate(
-            model, val_loader, criterion, device, y_mean, y_std
+        optimization_loss = train_one_epoch(
+            model,
+            train_loader,
+            criterion,
+            optimizer=optimizer,
+            device=device,
+        )
+        train_loss, train_accuracy = evaluate_epoch(
+            model,
+            train_loader,
+            criterion,
+            device=device,
+            accuracy_threshold=args.accuracy_threshold,
+        )
+        val_loss, val_accuracy = evaluate_epoch(
+            model,
+            val_loader,
+            criterion,
+            device=device,
+            accuracy_threshold=args.accuracy_threshold,
         )
 
         scheduler.step(val_loss)
 
-        # 🔥 FIX 4: print LR
-        lr = optimizer.param_groups[0]["lr"]
+        optimization_losses.append(optimization_loss)
+        train_losses.append(train_loss)
+        val_losses.append(val_loss)
+        train_accuracies.append(train_accuracy)
+        val_accuracies.append(val_accuracy)
 
         print(
-            f"Epoch {epoch:03d} | "
-            f"LR: {lr:.6f} | "
-            f"Train Loss: {train_loss:.4f} | "
-            f"Val Loss: {val_loss:.4f} | "
-            f"MAE: {val_mae:.4f} | RMSE: {val_rmse:.4f} | R2: {val_r2:.4f}"
+            f"Epoch {epoch:03d} | Train MSE: {train_loss:.6f} | Val MSE: {val_loss:.6f} "
+            f"| Train Acc: {train_accuracy:.6f} | Val Acc: {val_accuracy:.6f}"
         )
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
+            best_epoch = epoch
             patience_counter = 0
-            torch.save(model.state_dict(), ROOT_DIR / "models" / "best_model.pt")
+
+            checkpoint = {
+                "model_state_dict": model.state_dict(),
+                "config": {
+                    "hidden_dim": args.hidden_dim,
+                    "num_layers": args.num_layers,
+                    "heads": args.heads,
+                    "dropout": args.dropout,
+                    "learning_rate": args.learning_rate,
+                    "weight_decay": args.weight_decay,
+                    "batch_size": args.batch_size,
+                    "epochs": args.epochs,
+                    "patience": args.patience,
+                    "min_epochs_before_stop": args.min_epochs_before_stop,
+                    "seed": args.seed,
+                    "accuracy_threshold": args.accuracy_threshold,
+                },
+                "feature_info": {
+                    "in_channels": int(sample.num_node_features),
+                    "edge_dim": edge_dim,
+                },
+                "split_indices": split_indices,
+                "best_epoch": best_epoch,
+                "best_val_mse": best_val_loss,
+            }
+            torch.save(checkpoint, ROOT_DIR / "models" / "best_gat_model.pt")
         else:
             patience_counter += 1
 
-        if patience_counter >= args.patience:
-            print("Early stopping triggered")
+        if epoch >= args.min_epochs_before_stop and patience_counter >= args.patience:
+            print(f"Early stopping at epoch {epoch} (patience={args.patience}).")
             break
 
-    # ===== Load best model =====
-    model.load_state_dict(
-        torch.load(ROOT_DIR / "models" / "best_model.pt", map_location=device)
-    )
+    save_loss_plot(train_losses, val_losses, ROOT_DIR / "plots" / "training_loss.png")
+    save_accuracy_plot(train_accuracies, val_accuracies, ROOT_DIR / "plots" / "training_accuracy.png")
 
-    # ===== Test =====
-    test_loss, test_mae, test_rmse, test_r2 = evaluate(
-        model, test_loader, criterion, device, y_mean, y_std
-    )
+    train_summary = {
+        "num_samples": {
+            "total": len(graph_data_list),
+            "train": len(train_dataset),
+            "validation": len(val_dataset),
+            "test": len(test_dataset),
+        },
+        "best_epoch": best_epoch,
+        "best_val_mse": best_val_loss,
+        "optimization_loss_history": optimization_losses,
+        "train_loss_history": train_losses,
+        "val_loss_history": val_losses,
+        "train_accuracy_history": train_accuracies,
+        "val_accuracy_history": val_accuracies,
+    }
 
-    print("\n===== FINAL TEST =====")
-    print(f"Test MAE: {test_mae:.4f}")
-    print(f"Test RMSE: {test_rmse:.4f}")
-    print(f"Test R2: {test_r2:.4f}")
+    with open(ROOT_DIR / "models" / "train_metadata.json", "w", encoding="utf-8") as f:
+        json.dump(train_summary, f, indent=2)
+
+    print("Training completed.")
+    print(f"Best epoch: {best_epoch}, Best val MSE: {best_val_loss:.6f}")
+    print(f"Saved model: {ROOT_DIR / 'models' / 'best_gat_model.pt'}")
+    print(f"Saved plot: {ROOT_DIR / 'plots' / 'training_loss.png'}")
+    print(f"Saved plot: {ROOT_DIR / 'plots' / 'training_accuracy.png'}")
 
 
 if __name__ == "__main__":
