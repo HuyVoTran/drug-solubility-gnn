@@ -8,12 +8,24 @@ import torch
 from rdkit import Chem
 from rdkit.Chem.rdchem import BondType, HybridizationType
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
 from torch_geometric.data import Data
 
 
 ATOM_TYPES = [
-    "H", "C", "N", "O", "F", "P", "S", "Cl", "Br", "I", "Si", "B", "Se", "other"
+    "H",
+    "C",
+    "N",
+    "O",
+    "F",
+    "P",
+    "S",
+    "Cl",
+    "Br",
+    "I",
+    "Si",
+    "B",
+    "Se",
+    "other",
 ]
 
 HYBRIDIZATION_TYPES = [
@@ -28,7 +40,6 @@ HYBRIDIZATION_TYPES = [
 BOND_TYPES = [BondType.SINGLE, BondType.DOUBLE, BondType.TRIPLE, BondType.AROMATIC]
 
 MAX_DEGREE = 5
-MAX_ATOMIC_NUM = 118  # Oganesson
 
 
 def _one_hot(value, categories: Sequence):
@@ -36,116 +47,24 @@ def _one_hot(value, categories: Sequence):
 
 
 def _atom_features(atom: Chem.rdchem.Atom) -> List[float]:
-    """
-    Enhanced atom features for better molecular representation.
+    symbol = atom.GetSymbol()
+    if symbol not in ATOM_TYPES:
+        symbol = "other"
+    atom_type_feature = _one_hot(symbol, ATOM_TYPES)
 
-    Features:
-    - Atomic number (normalized)
-    - Degree (one-hot)
-    - Hybridization (one-hot)
-    - Aromaticity (binary)
-    - Formal charge (normalized)
-    - Is in ring (binary)
-    """
-    # Atomic number (normalized to [0,1])
-    atomic_num = atom.GetAtomicNum()
-    atomic_num_norm = atomic_num / MAX_ATOMIC_NUM
-
-    # Degree (one-hot encoded)
     degree = min(atom.GetDegree(), MAX_DEGREE)
     degree_feature = _one_hot(degree, list(range(MAX_DEGREE + 1)))
 
-    # Hybridization (one-hot)
+    formal_charge = float(atom.GetFormalCharge())
+
     hybridization = atom.GetHybridization()
     if hybridization not in HYBRIDIZATION_TYPES:
         hybridization = "other"
     hybridization_feature = _one_hot(hybridization, HYBRIDIZATION_TYPES)
 
-    # Aromaticity
     aromaticity = [1.0 if atom.GetIsAromatic() else 0.0]
 
-    # Formal charge (normalized, assuming range -3 to +3)
-    formal_charge = atom.GetFormalCharge()
-    formal_charge_norm = (formal_charge + 3) / 6.0  # Normalize to [0,1]
-
-    # Is in ring
-    in_ring = [1.0 if atom.IsInRing() else 0.0]
-
-    return [atomic_num_norm] + degree_feature + hybridization_feature + aromaticity + [formal_charge_norm] + in_ring
-
-
-def _bond_features(bond: Chem.rdchem.Bond) -> List[float]:
-    """
-    Enhanced bond features.
-
-    Features:
-    - Bond type (one-hot: single/double/triple/aromatic)
-    - Conjugation (binary)
-    - Is in ring (binary)
-    """
-    # Bond type (one-hot)
-    bond_type = bond.GetBondType()
-    bond_type_feature = _one_hot(bond_type, BOND_TYPES)
-
-    # Conjugation
-    conjugation = [1.0 if bond.GetIsConjugated() else 0.0]
-
-    # Is in ring
-    in_ring = [1.0 if bond.IsInRing() else 0.0]
-
-    return bond_type_feature + conjugation + in_ring
-
-
-def normalize_features(graph_data_list: List[Data]) -> Tuple[List[Data], Dict[str, StandardScaler]]:
-    """
-    Normalize node and edge features using StandardScaler.
-
-    Returns:
-    - List of normalized Data objects
-    - Dictionary of scalers for potential inverse transform
-    """
-    if not graph_data_list:
-        return graph_data_list, {}
-
-    # Collect all node features
-    all_node_features = []
-    all_edge_features = []
-
-    for data in graph_data_list:
-        all_node_features.append(data.x.numpy())
-        if data.edge_attr is not None and data.edge_attr.numel() > 0:
-            all_edge_features.append(data.edge_attr.numpy())
-
-    # Fit scalers
-    scalers = {}
-    if all_node_features:
-        all_node_features = np.vstack(all_node_features)
-        node_scaler = StandardScaler()
-        node_scaler.fit(all_node_features)
-        scalers['node'] = node_scaler
-
-    if all_edge_features:
-        all_edge_features = np.vstack(all_edge_features)
-        edge_scaler = StandardScaler()
-        edge_scaler.fit(all_edge_features)
-        scalers['edge'] = edge_scaler
-
-    # Apply normalization
-    normalized_data_list = []
-    for data in graph_data_list:
-        new_data = data.clone()
-
-        # Normalize node features
-        if 'node' in scalers:
-            new_data.x = torch.tensor(scalers['node'].transform(data.x.numpy()), dtype=torch.float)
-
-        # Normalize edge features
-        if 'edge' in scalers and data.edge_attr is not None and data.edge_attr.numel() > 0:
-            new_data.edge_attr = torch.tensor(scalers['edge'].transform(data.edge_attr.numpy()), dtype=torch.float)
-
-        normalized_data_list.append(new_data)
-
-    return normalized_data_list, scalers
+    return atom_type_feature + degree_feature + [formal_charge] + hybridization_feature + aromaticity
 
 
 def _bond_features(bond: Chem.rdchem.Bond) -> List[float]:
@@ -216,19 +135,7 @@ def load_raw_dataset(csv_path: str) -> pd.DataFrame:
     return dataset_df
 
 
-def build_graph_dataset(dataset_df: pd.DataFrame, normalize: bool = True) -> Tuple[List[Data], List[int], Dict[str, StandardScaler]]:
-    """
-    Build graph dataset from SMILES dataframe.
-
-    Args:
-        dataset_df: DataFrame with SMILES and LogS columns
-        normalize: Whether to normalize features
-
-    Returns:
-        - List of Data objects
-        - List of valid indices
-        - Dictionary of feature scalers (if normalize=True)
-    """
+def build_graph_dataset(dataset_df: pd.DataFrame) -> Tuple[List[Data], List[int]]:
     graph_data_list: List[Data] = []
     valid_indices: List[int] = []
 
@@ -242,12 +149,7 @@ def build_graph_dataset(dataset_df: pd.DataFrame, normalize: bool = True) -> Tup
     if not graph_data_list:
         raise ValueError("No valid molecular graphs were generated from dataset.")
 
-    # Normalize features if requested
-    scalers = {}
-    if normalize:
-        graph_data_list, scalers = normalize_features(graph_data_list)
-
-    return graph_data_list, valid_indices, scalers
+    return graph_data_list, valid_indices
 
 
 def create_data_splits(
