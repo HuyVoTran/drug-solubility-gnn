@@ -1,3 +1,8 @@
+<!-- 
+git add .
+git commit -m "add login feature"
+git push
+ -->
 # Drug Solubility Prediction using Graph Attention Networks
 
 Dự đoán **độ hòa tan trong nước (aqueous solubility)** của phân tử dưới dạng **regression** bằng **Graph Attention Network (GAT)**, sử dụng **PyTorch + PyTorch Geometric**. Phân tử được biểu diễn dưới dạng molecular graph với atoms là nodes và bonds là edges.
