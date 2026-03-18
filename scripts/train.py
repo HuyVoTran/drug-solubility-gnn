@@ -64,6 +64,10 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
         loss = criterion(out, batch.y.view(-1))
 
         loss.backward()
+
+        # 🔥 FIX 1: Gradient Clipping
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 2.0)
+
         optimizer.step()
 
         total_loss += loss.item() * batch.num_graphs
@@ -87,7 +91,7 @@ def evaluate(model, loader, criterion, device, y_mean, y_std):
             loss = criterion(out, batch.y.view(-1))
             total_loss += loss.item() * batch.num_graphs
 
-            # 🔥 DENORMALIZE
+            # 🔥 Denormalize
             preds = out.cpu().numpy() * y_std + y_mean
             targets = batch.y.view(-1).cpu().numpy() * y_std + y_mean
 
@@ -102,15 +106,17 @@ def evaluate(model, loader, criterion, device, y_mean, y_std):
 # ===== Main =====
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--epochs", type=int, default=150)
+
+    # 🔥 FIX 2: Better config (QUAN TRỌNG)
+    parser.add_argument("--epochs", type=int, default=300)
     parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--lr", type=float, default=5e-4)
     parser.add_argument("--weight-decay", type=float, default=5e-4)
-    parser.add_argument("--hidden-dim", type=int, default=64)
-    parser.add_argument("--num-layers", type=int, default=3)
-    parser.add_argument("--heads", type=int, default=4)
-    parser.add_argument("--dropout", type=float, default=0.5)
-    parser.add_argument("--patience", type=int, default=10)
+    parser.add_argument("--hidden-dim", type=int, default=128)
+    parser.add_argument("--num-layers", type=int, default=4)
+    parser.add_argument("--heads", type=int, default=8)
+    parser.add_argument("--dropout", type=float, default=0.3)
+    parser.add_argument("--patience", type=int, default=15)
     parser.add_argument("--seed", type=int, default=42)
 
     args = parser.parse_args()
@@ -122,14 +128,15 @@ def main():
     # ===== Load data =====
     raw_df = load_raw_dataset(ROOT_DIR / "curated-solubility-dataset.csv")
 
-    # Normalize target
     y_mean = raw_df["solubility"].mean()
     y_std = raw_df["solubility"].std()
     raw_df["solubility"] = (raw_df["solubility"] - y_mean) / y_std
 
     graph_data_list, _ = build_graph_dataset(raw_df)
     split_indices = create_data_splits(graph_data_list, seed=args.seed)
-    train_dataset, val_dataset, test_dataset = get_split_datasets(graph_data_list, split_indices)
+    train_dataset, val_dataset, test_dataset = get_split_datasets(
+        graph_data_list, split_indices
+    )
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
@@ -149,17 +156,24 @@ def main():
     ).to(device)
 
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5)
+
+    # 🔥 FIX 3: Better scheduler
+    scheduler = ReduceLROnPlateau(
+        optimizer,
+        mode="min",
+        factor=0.5,
+        patience=3,
+        min_lr=1e-5,
+    )
 
     criterion = nn.SmoothL1Loss()
 
-    # ===== Fix save dir =====
     os.makedirs(ROOT_DIR / "models", exist_ok=True)
 
     best_val_loss = float("inf")
     patience_counter = 0
 
-    # ===== Training loop =====
+    # ===== Training =====
     for epoch in range(1, args.epochs + 1):
         train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device)
 
@@ -169,8 +183,12 @@ def main():
 
         scheduler.step(val_loss)
 
+        # 🔥 FIX 4: print LR
+        lr = optimizer.param_groups[0]["lr"]
+
         print(
             f"Epoch {epoch:03d} | "
+            f"LR: {lr:.6f} | "
             f"Train Loss: {train_loss:.4f} | "
             f"Val Loss: {val_loss:.4f} | "
             f"MAE: {val_mae:.4f} | RMSE: {val_rmse:.4f} | R2: {val_r2:.4f}"
@@ -188,9 +206,11 @@ def main():
             break
 
     # ===== Load best model =====
-    model.load_state_dict(torch.load(ROOT_DIR / "models" / "best_model.pt"))
+    model.load_state_dict(
+        torch.load(ROOT_DIR / "models" / "best_model.pt", map_location=device)
+    )
 
-    # ===== Final Test =====
+    # ===== Test =====
     test_loss, test_mae, test_rmse, test_r2 = evaluate(
         model, test_loader, criterion, device, y_mean, y_std
     )
