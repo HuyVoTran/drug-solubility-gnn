@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import random
 import sys
@@ -30,7 +29,6 @@ from drug_solubility_gnn.model import GATRegressor
 
 
 # ===== Utils =====
-
 def set_seed(seed: int):
     random.seed(seed)
     np.random.seed(seed)
@@ -53,8 +51,7 @@ def compute_metrics(y_true, y_pred):
     return mae, rmse, r2
 
 
-# ===== Train / Eval =====
-
+# ===== Train =====
 def train_one_epoch(model, loader, criterion, optimizer, device):
     model.train()
     total_loss = 0
@@ -74,7 +71,8 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
     return total_loss / len(loader.dataset)
 
 
-def evaluate(model, loader, criterion, device):
+# ===== Evaluate =====
+def evaluate(model, loader, criterion, device, y_mean, y_std):
     model.eval()
     total_loss = 0
 
@@ -89,8 +87,12 @@ def evaluate(model, loader, criterion, device):
             loss = criterion(out, batch.y.view(-1))
             total_loss += loss.item() * batch.num_graphs
 
-            all_preds.extend(out.cpu().numpy())
-            all_targets.extend(batch.y.view(-1).cpu().numpy())
+            # 🔥 DENORMALIZE
+            preds = out.cpu().numpy() * y_std + y_mean
+            targets = batch.y.view(-1).cpu().numpy() * y_std + y_mean
+
+            all_preds.extend(preds)
+            all_targets.extend(targets)
 
     mae, rmse, r2 = compute_metrics(all_targets, all_preds)
 
@@ -98,7 +100,6 @@ def evaluate(model, loader, criterion, device):
 
 
 # ===== Main =====
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--epochs", type=int, default=150)
@@ -152,17 +153,28 @@ def main():
 
     criterion = nn.SmoothL1Loss()
 
+    # ===== Fix save dir =====
+    os.makedirs(ROOT_DIR / "models", exist_ok=True)
+
     best_val_loss = float("inf")
     patience_counter = 0
 
+    # ===== Training loop =====
     for epoch in range(1, args.epochs + 1):
         train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device)
 
-        val_loss, val_mae, val_rmse, val_r2 = evaluate(model, val_loader, criterion, device)
+        val_loss, val_mae, val_rmse, val_r2 = evaluate(
+            model, val_loader, criterion, device, y_mean, y_std
+        )
 
         scheduler.step(val_loss)
 
-        print(f"Epoch {epoch:03d} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | MAE: {val_mae:.4f} | RMSE: {val_rmse:.4f} | R2: {val_r2:.4f}")
+        print(
+            f"Epoch {epoch:03d} | "
+            f"Train Loss: {train_loss:.4f} | "
+            f"Val Loss: {val_loss:.4f} | "
+            f"MAE: {val_mae:.4f} | RMSE: {val_rmse:.4f} | R2: {val_r2:.4f}"
+        )
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -175,8 +187,13 @@ def main():
             print("Early stopping triggered")
             break
 
+    # ===== Load best model =====
+    model.load_state_dict(torch.load(ROOT_DIR / "models" / "best_model.pt"))
+
     # ===== Final Test =====
-    test_loss, test_mae, test_rmse, test_r2 = evaluate(model, test_loader, criterion, device)
+    test_loss, test_mae, test_rmse, test_r2 = evaluate(
+        model, test_loader, criterion, device, y_mean, y_std
+    )
 
     print("\n===== FINAL TEST =====")
     print(f"Test MAE: {test_mae:.4f}")

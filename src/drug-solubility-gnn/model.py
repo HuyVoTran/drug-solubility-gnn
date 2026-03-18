@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch_geometric.nn import GATConv, global_mean_pool
+from torch_geometric.nn import GATv2Conv, global_mean_pool
 
 
 class GATRegressor(nn.Module):
@@ -12,40 +12,35 @@ class GATRegressor(nn.Module):
         in_channels: int,
         edge_dim: int,
         hidden_dim: int = 64,
-        num_layers: int = 2,
+        num_layers: int = 3,
         heads: int = 4,
-        dropout: float = 0.2,
+        dropout: float = 0.5,
     ):
         super().__init__()
-        if num_layers < 2:
-            raise ValueError("num_layers must be >= 2")
 
         self.dropout = dropout
+
+        # Input projection
         self.input_proj = nn.Linear(in_channels, hidden_dim)
+
+        # GATv2 layers
         self.gat_layers = nn.ModuleList()
-        self.use_edge_attr = True
+        self.norms = nn.ModuleList()
 
         for _ in range(num_layers):
-            try:
-                layer = GATConv(
-                    in_channels=hidden_dim,
-                    out_channels=hidden_dim,
+            self.gat_layers.append(
+                GATv2Conv(
+                    hidden_dim,
+                    hidden_dim,
                     heads=heads,
                     concat=False,
                     dropout=dropout,
                     edge_dim=edge_dim,
                 )
-            except TypeError:
-                self.use_edge_attr = False
-                layer = GATConv(
-                    in_channels=hidden_dim,
-                    out_channels=hidden_dim,
-                    heads=heads,
-                    concat=False,
-                    dropout=dropout,
-                )
-            self.gat_layers.append(layer)
+            )
+            self.norms.append(nn.LayerNorm(hidden_dim))
 
+        # Regressor
         self.regressor = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
@@ -56,17 +51,20 @@ class GATRegressor(nn.Module):
     def forward(self, data):
         x, edge_index, edge_attr, batch = data.x, data.edge_index, data.edge_attr, data.batch
 
-        x = self.input_proj(x)
-        x = F.elu(x)
+        x = F.elu(self.input_proj(x))
 
-        for gat_layer in self.gat_layers:
-            if self.use_edge_attr:
-                x = gat_layer(x, edge_index, edge_attr=edge_attr)
-            else:
-                x = gat_layer(x, edge_index)
+        for gat, norm in zip(self.gat_layers, self.norms):
+            residual = x  # skip connection
+
+            x = gat(x, edge_index, edge_attr=edge_attr)
+            x = norm(x)
+
             x = F.elu(x)
             x = F.dropout(x, p=self.dropout, training=self.training)
 
+            x = x + residual  # residual connection
+
         x = global_mean_pool(x, batch)
         out = self.regressor(x)
+
         return out.view(-1)
