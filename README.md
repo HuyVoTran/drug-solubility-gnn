@@ -1,7 +1,7 @@
 <!-- 
 
 git add .
-git commit -m "add login feature"
+git commit -m "fix feature"
 git push
 
  -->
