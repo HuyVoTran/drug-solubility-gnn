@@ -44,14 +44,14 @@ from drug_solubility_gnn.model import GATRegressor  # noqa: E402
 def get_args_colab(
     data_path="curated-solubility-dataset.csv",
     epochs=150,
-    learning_rate=5e-4,           # Mức hợp lý
-    weight_decay=1e-3,            # Mức hợp lý
-    batch_size=64,                # Mức hợp lý
-    hidden_dim=32,                # Mức hợp lý
-    num_layers=2,                 # Mức hợp lý
+    learning_rate=5e-4,
+    weight_decay=3e-4,
+    batch_size=128,
+    hidden_dim=64,
+    num_layers=2,
     heads=4,
-    dropout=0.4,                  # Mức hợp lý
-    patience=25,                  # Mức hợp lý
+    dropout=0.25,
+    patience=20,
     min_epochs_before_stop=100,
     num_workers=0,
     seed=42,
@@ -139,11 +139,27 @@ def evaluate_epoch(model, loader, criterion, device="cpu", accuracy_threshold=0.
     return epoch_loss, epoch_accuracy
 
 
+def _ema(values: list[float], alpha: float = 0.15) -> list[float]:
+    """Exponential moving average for smoother plot lines."""
+    smoothed = []
+    s = values[0]
+    for v in values:
+        s = alpha * v + (1 - alpha) * s
+        smoothed.append(s)
+    return smoothed
+
+
 def save_loss_plot(train_losses, val_losses, output_path: Path):
     epochs = range(1, len(train_losses) + 1)
+    train_smooth = _ema(train_losses)
+    val_smooth = _ema(val_losses)
     plt.figure(figsize=(8, 5))
-    plt.plot(epochs, train_losses, label="Train Loss (MAE)", color="#1f77b4", linewidth=2)
-    plt.plot(epochs, val_losses, label="Validation Loss (MAE)", color="#ff7f0e", linewidth=2)
+    # Raw curves — faint background
+    plt.plot(epochs, train_losses, color="#1f77b4", linewidth=0.8, alpha=0.25)
+    plt.plot(epochs, val_losses, color="#ff7f0e", linewidth=0.8, alpha=0.25)
+    # Smoothed curves — prominent foreground
+    plt.plot(epochs, train_smooth, label="Train Loss (MAE)", color="#1f77b4", linewidth=2)
+    plt.plot(epochs, val_smooth, label="Validation Loss (MAE)", color="#ff7f0e", linewidth=2)
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.title("Train vs Validation Loss")
@@ -156,10 +172,15 @@ def save_loss_plot(train_losses, val_losses, output_path: Path):
 
 def save_accuracy_plot(train_accuracies, val_accuracies, output_path: Path):
     epochs = range(1, len(train_accuracies) + 1)
+    train_smooth = _ema(train_accuracies)
+    val_smooth = _ema(val_accuracies)
     plt.figure(figsize=(8, 5))
-    plt.plot(epochs, train_accuracies, label="Train Accuracy", color="#1f77b4", linewidth=2, linestyle="-")
-    plt.plot(epochs, val_accuracies, label="Validation Accuracy", color="#ff7f0e", linewidth=2, linestyle="-")
-    # Đánh dấu vùng overlap (nếu muốn, có thể thêm fill_between)
+    # Raw curves — faint background
+    plt.plot(epochs, train_accuracies, color="#1f77b4", linewidth=0.8, alpha=0.25)
+    plt.plot(epochs, val_accuracies, color="#ff7f0e", linewidth=0.8, alpha=0.25)
+    # Smoothed curves — prominent foreground
+    plt.plot(epochs, train_smooth, label="Train Accuracy", color="#1f77b4", linewidth=2)
+    plt.plot(epochs, val_smooth, label="Validation Accuracy", color="#ff7f0e", linewidth=2)
     plt.xlabel("Epoch")
     plt.ylabel("Accuracy")
     plt.title("Train vs Validation Accuracy")
@@ -190,14 +211,14 @@ def main(
         args = get_args_colab(
             data_path=data_path or "curated-solubility-dataset.csv",
             epochs=epochs or 150,
-            learning_rate=learning_rate or 1e-3,
-            weight_decay=weight_decay or 1e-4,
-            batch_size=batch_size or 32,
-            hidden_dim=hidden_dim or 128,
-            num_layers=num_layers or 3,
+            learning_rate=learning_rate or 5e-4,
+            weight_decay=weight_decay or 3e-4,
+            batch_size=batch_size or 128,
+            hidden_dim=hidden_dim or 64,
+            num_layers=num_layers or 2,
             heads=heads or 4,
-            dropout=dropout or 0.15,
-            patience=patience or 15,
+            dropout=dropout or 0.25,
+            patience=patience or 20,
             min_epochs_before_stop=min_epochs_before_stop or 100,
             num_workers=num_workers or 0,
             seed=seed or 42,
@@ -207,14 +228,14 @@ def main(
         parser = argparse.ArgumentParser(description="Train GAT model for aqueous solubility prediction")
         parser.add_argument("--data-path", type=str, default=str(ROOT_DIR / "curated-solubility-dataset.csv"))
         parser.add_argument("--epochs", type=int, default=150)
-        parser.add_argument("--learning-rate", type=float, default=1e-3)
-        parser.add_argument("--weight-decay", type=float, default=1e-4)
-        parser.add_argument("--batch-size", type=int, default=32)
-        parser.add_argument("--hidden-dim", type=int, default=128)
-        parser.add_argument("--num-layers", type=int, default=3)
+        parser.add_argument("--learning-rate", type=float, default=5e-4)
+        parser.add_argument("--weight-decay", type=float, default=3e-4)
+        parser.add_argument("--batch-size", type=int, default=128)
+        parser.add_argument("--hidden-dim", type=int, default=64)
+        parser.add_argument("--num-layers", type=int, default=2)
         parser.add_argument("--heads", type=int, default=4)
-        parser.add_argument("--dropout", type=float, default=0.15)
-        parser.add_argument("--patience", type=int, default=15)
+        parser.add_argument("--dropout", type=float, default=0.25)
+        parser.add_argument("--patience", type=int, default=20)
         parser.add_argument("--min-epochs-before-stop", type=int, default=100)
         parser.add_argument("--num-workers", type=int, default=0)
         parser.add_argument("--seed", type=int, default=42)
@@ -261,7 +282,7 @@ def main(
     ).to(device)
 
     optimizer = Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
-    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=5)
+    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=8, min_lr=1e-5)
     criterion = nn.L1Loss()
 
     best_val_loss = float("inf")

@@ -139,13 +139,10 @@ GATConv Layer 1  (heads=4, concat=False, edge_dim=4)
 GATConv Layer 2  (heads=4, concat=False, edge_dim=4)
     │
     ▼
-GATConv Layer 3  (heads=4, concat=False, edge_dim=4)
-    │
-    ▼
 Global Mean Pooling (graph → vector)
     │
     ▼
-MLP: Linear(96) → ReLU → Dropout → Linear(1)
+MLP: Linear(64) → ReLU → Dropout → Linear(1)
     │
     ▼
 Predicted LogS (scalar)
@@ -162,16 +159,16 @@ Predicted LogS (scalar)
 |---|---|
 | `epochs` | 150 |
 | `min_epochs_before_stop` | 100 |
-| `learning_rate` | 1e-3 |
-| `weight_decay` | 5e-4 |
-| `batch_size` | 64 |
-| `hidden_dim` | 96 |
-| `num_layers` | 3 |
+| `learning_rate` | 5e-4 |
+| `weight_decay` | 3e-4 |
+| `batch_size` | 128 |
+| `hidden_dim` | 64 |
+| `num_layers` | 2 |
 | `heads` | 4 |
-| `dropout` | 0.3 |
-| `early_stopping patience` | 15 |
-| `scheduler` | ReduceLROnPlateau (factor=0.5, patience=3) |
-| `loss` | MSELoss |
+| `dropout` | 0.25 |
+| `early_stopping patience` | 20 |
+| `scheduler` | ReduceLROnPlateau (factor=0.5, patience=8, min_lr=1e-5) |
+| `loss` | MAELoss (L1) |
 | `optimizer` | Adam |
 | `accuracy threshold` | 0.5 LogS unit |
 
@@ -215,8 +212,9 @@ python test.py
 Tuỳ chỉnh hyperparameter qua CLI:
 
 ```bash
-python train.py --epochs 150 --hidden-dim 128 --num-layers 3 --dropout 0.15 --batch-size 64
-python test.py --checkpoint models/best_gat_model.pt
+python train.py --epochs 150 --hidden-dim 64 --num-layers 2 --dropout 0.25 --batch-size 128
+python test.py --num-runs 5
+python test.py --seeds 42 123 2024 7 999
 ```
 
 ---
@@ -228,14 +226,35 @@ python test.py --checkpoint models/best_gat_model.pt
 !git clone https://github.com/HuyVoTran/drug-solubility-gnn
 %cd drug-solubility-gnn
 
-# Bước 2: Cài dependencies
-!pip install -r requirements.txt
+# Bước 2: Cài PyTorch (CUDA 12.1)
+!pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 
-# Bước 3: Huấn luyện
+# Bước 3: Cài PyTorch Geometric và các thư viện còn lại
+!pip install torch-geometric
+!pip install rdkit pandas numpy scikit-learn matplotlib tqdm
+
+# Bước 4: Huấn luyện
 !python train.py
 
-# Bước 4: Đánh giá
+# Bước 5: Đánh giá thống kê (5 seeds mặc định)
 !python test.py
+```
+
+Xem kết quả và biểu đồ ngay trong notebook:
+
+```python
+import json
+from IPython.display import Image, display
+
+# Metrics tổng hợp
+with open("results/statistical_test_metrics.json") as f:
+    print(json.dumps(json.load(f), indent=2))
+
+# Biểu đồ
+display(Image("plots/training_loss.png"))
+display(Image("plots/training_accuracy.png"))
+display(Image("plots/prediction_vs_true.png"))
+display(Image("plots/residual_plot.png"))
 ```
 
 Nếu đã clone rồi và chỉ muốn cập nhật code mới nhất:
@@ -263,7 +282,8 @@ Nếu đã clone rồi và chỉ muốn cập nhật code mới nhất:
 
 | File | Mô tả |
 |---|---|
-| `results/test_metrics.json` | RMSE, MAE, R² trên test set |
+| `results/test_metrics.json` | RMSE, MAE, R² trên test set (seed đầu tiên) |
+| `results/statistical_test_metrics.json` | RMSE, MAE, R² trung bình ± std trên nhiều seeds |
 | `plots/prediction_vs_true.png` | Scatter plot: True LogS vs Predicted LogS |
 | `plots/residual_plot.png` | Residuals (True − Predicted) vs Predicted LogS |
 
@@ -287,11 +307,15 @@ Kết quả đánh giá trên **test set** (10% dataset, ~998 mẫu), checkpoint
 
 | Quyết định | Lý do |
 |---|---|
-| `hidden_dim=96` + `num_layers=3` | Capacity vừa đủ để học biểu diễn phân tử; giảm so với 128 để hạn chế overfitting |
-| `dropout=0.3` | Regularization mạnh hơn để thu hẹp gap giữa train và validation loss |
-| `weight_decay=5e-4` | L2 penalty đủ mạnh để model tổng quát hóa tốt hơn trên phân tử chưa thấy |
-| `ReduceLROnPlateau` (patience=3) | Giảm LR nhanh hơn khi val loss plateau, tránh oscillation cuối train |
-| `early stopping` (patience=15, min=100) | Đảm bảo chạy ít nhất 100 epoch, sau đó dừng nếu val loss không cải thiện 15 epoch liên tiếp |
+| `hidden_dim=64` + `num_layers=2` | Capacity nhỏ gọn, giảm overfitting, val loss dễ theo kịp train loss |
+| `dropout=0.25` | Regularization cân bằng — đủ để giảm gap train/val mà không làm model underfitting |
+| `weight_decay=3e-4` | L2 penalty vừa đủ để tổng quát hóa tốt trên phân tử chưa thấy |
+| `batch_size=128` | Gradient mượt hơn, giảm oscillation đáng kể so với batch nhỏ |
+| `learning_rate=5e-4` | Khởi đầu chậm hơn, tránh spike đầu training, loss giảm đều hơn |
+| `ReduceLROnPlateau` (patience=8, min_lr=1e-5) | Không giảm LR quá sớm; `min_lr` tránh model bị đông cứng |
+| `early stopping` (patience=20, min=100) | Đảm bảo chạy ít nhất 100 epoch, sau đó dừng nếu val loss không cải thiện 20 epoch liên tiếp |
+| `L1Loss (MAE)` | Robust hơn với outliers so với MSE, loss thực tế phản ánh đúng sai số tuyệt đối |
 | `heads=4` | Multi-head attention học nhiều loại tương tác hóa học khác nhau cùng lúc |
 | `edge_attr` (bond type) | Thêm thông tin loại liên kết giúp GAT phân biệt cấu trúc tốt hơn |
-| `global_mean_pool` | Pooling bền vững với phân tử có kích thước khác nhau (dataset có phân tử đơn đến ~50+ atoms) |
+| `global_mean_pool` | Pooling bền vững với phân tử có kích thước khác nhau |
+| EMA smoothing (α=0.15) | Đường loss/accuracy mượt hơn trên biểu đồ, xu hướng hội tụ rõ ràng hơn |
