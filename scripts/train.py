@@ -44,15 +44,15 @@ from drug_solubility_gnn.model import GATRegressor  # noqa: E402
 def get_args_colab(
     data_path="curated-solubility-dataset.csv",
     epochs=150,
-    learning_rate=1.2e-3,
-    weight_decay=5e-4,
-    batch_size=256,
+    learning_rate=1.5e-3,
+    weight_decay=2e-4,
+    batch_size=128,
     hidden_dim=96,
     num_layers=3,
     heads=4,
-    dropout=0.2,
+    dropout=0.15,
     patience=25,
-    min_epochs_before_stop=100,
+    min_epochs_before_stop=120,
     num_workers=0,
     seed=42,
     accuracy_threshold=0.5,
@@ -190,15 +190,15 @@ def main(
         args = get_args_colab(
             data_path=data_path or "curated-solubility-dataset.csv",
             epochs=epochs or 150,
-            learning_rate=learning_rate or 1.2e-3,
-            weight_decay=weight_decay or 5e-4,
-            batch_size=batch_size or 256,
+            learning_rate=learning_rate or 1.5e-3,
+            weight_decay=weight_decay or 2e-4,
+            batch_size=batch_size or 128,
             hidden_dim=hidden_dim or 96,
             num_layers=num_layers or 3,
             heads=heads or 4,
-            dropout=dropout or 0.2,
+            dropout=dropout or 0.15,
             patience=patience or 25,
-            min_epochs_before_stop=min_epochs_before_stop or 100,
+            min_epochs_before_stop=min_epochs_before_stop or 120,
             num_workers=num_workers or 0,
             seed=seed or 42,
             accuracy_threshold=accuracy_threshold or 0.5,
@@ -207,15 +207,15 @@ def main(
         parser = argparse.ArgumentParser(description="Train GAT model for aqueous solubility prediction")
         parser.add_argument("--data-path", type=str, default=str(ROOT_DIR / "curated-solubility-dataset.csv"))
         parser.add_argument("--epochs", type=int, default=150)
-        parser.add_argument("--learning-rate", type=float, default=1.2e-3)
-        parser.add_argument("--weight-decay", type=float, default=5e-4)
-        parser.add_argument("--batch-size", type=int, default=256)
+        parser.add_argument("--learning-rate", type=float, default=1.5e-3)
+        parser.add_argument("--weight-decay", type=float, default=2e-4)
+        parser.add_argument("--batch-size", type=int, default=128)
         parser.add_argument("--hidden-dim", type=int, default=96)
         parser.add_argument("--num-layers", type=int, default=3)
         parser.add_argument("--heads", type=int, default=4)
-        parser.add_argument("--dropout", type=float, default=0.2)
+        parser.add_argument("--dropout", type=float, default=0.15)
         parser.add_argument("--patience", type=int, default=25)
-        parser.add_argument("--min-epochs-before-stop", type=int, default=100)
+        parser.add_argument("--min-epochs-before-stop", type=int, default=120)
         parser.add_argument("--num-workers", type=int, default=0)
         parser.add_argument("--seed", type=int, default=42)
         parser.add_argument("--accuracy-threshold", type=float, default=0.5)
