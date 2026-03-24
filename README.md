@@ -142,7 +142,7 @@ GATConv Layer 2  (heads=4, concat=False, edge_dim=4)
 Global Mean Pooling (graph → vector)
     │
     ▼
-MLP: Linear(64) → ReLU → Dropout → Linear(1)
+MLP: Linear(80) → ReLU → Dropout → Linear(1)
     │
     ▼
 Predicted LogS (scalar)
@@ -159,15 +159,15 @@ Predicted LogS (scalar)
 |---|---|
 | `epochs` | 150 |
 | `min_epochs_before_stop` | 100 |
-| `learning_rate` | 5e-4 |
-| `weight_decay` | 3e-4 |
+| `learning_rate` | 1e-3 |
+| `weight_decay` | 2e-4 |
 | `batch_size` | 128 |
-| `hidden_dim` | 64 |
+| `hidden_dim` | 80 |
 | `num_layers` | 2 |
 | `heads` | 4 |
-| `dropout` | 0.25 |
-| `early_stopping patience` | 20 |
-| `scheduler` | ReduceLROnPlateau (factor=0.5, patience=8, min_lr=1e-5) |
+| `dropout` | 0.2 |
+| `early_stopping patience` | 22 |
+| `scheduler` | ReduceLROnPlateau (factor=0.5, patience=4, min_lr=1e-5) |
 | `loss` | MAELoss (L1) |
 | `optimizer` | Adam |
 | `accuracy threshold` | 0.5 LogS unit |
@@ -212,7 +212,7 @@ python test.py
 Tuỳ chỉnh hyperparameter qua CLI:
 
 ```bash
-python train.py --epochs 150 --hidden-dim 64 --num-layers 2 --dropout 0.25 --batch-size 128
+python train.py --epochs 150 --hidden-dim 80 --num-layers 2 --dropout 0.2 --batch-size 128
 python test.py --num-runs 5
 python test.py --seeds 42 123 2024 7 999
 ```
