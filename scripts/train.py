@@ -139,14 +139,29 @@ def evaluate_epoch(model, loader, criterion, device="cpu", accuracy_threshold=0.
     return epoch_loss, epoch_accuracy
 
 
-def save_loss_plot(train_losses, val_losses, output_path: Path):
+def _moving_average(values, window: int = 5):
+    if window <= 1 or len(values) < window:
+        return np.array(values)
+    cumsum = np.cumsum(np.insert(values, 0, 0.0))
+    ma = (cumsum[window:] - cumsum[:-window]) / window
+    # pad beginning to keep same length
+    pad = np.full(window - 1, ma[0]) if len(ma) > 0 else np.array([])
+    return np.concatenate([pad, ma])
+
+
+def save_loss_plot(train_losses, val_losses, output_path: Path, smoothing_window: int = 5):
     epochs = range(1, len(train_losses) + 1)
+    train_smooth = _moving_average(train_losses, window=smoothing_window)
+    val_smooth = _moving_average(val_losses, window=smoothing_window)
+
     plt.figure(figsize=(8, 5))
-    plt.plot(epochs, train_losses, label="Train Loss (MAE)", color="#1f77b4", linewidth=2)
-    plt.plot(epochs, val_losses, label="Validation Loss (MAE)", color="#ff7f0e", linewidth=2)
+    plt.plot(epochs, train_losses, label="Train MAE", color="#1f77b4", linewidth=1, alpha=0.4)
+    plt.plot(epochs, val_losses, label="Validation MAE", color="#ff7f0e", linewidth=1, alpha=0.4)
+    plt.plot(epochs, train_smooth, label=f"Train MAE (smoothed {smoothing_window})", color="#1f77b4", linewidth=2)
+    plt.plot(epochs, val_smooth, label=f"Validation MAE (smoothed {smoothing_window})", color="#ff7f0e", linewidth=2)
     plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.title("Train vs Validation Loss")
+    plt.ylabel("Mean Absolute Error")
+    plt.title("Train vs Validation MAE")
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
@@ -154,12 +169,16 @@ def save_loss_plot(train_losses, val_losses, output_path: Path):
     plt.close()
 
 
-def save_accuracy_plot(train_accuracies, val_accuracies, output_path: Path):
+def save_accuracy_plot(train_accuracies, val_accuracies, output_path: Path, smoothing_window: int = 5):
     epochs = range(1, len(train_accuracies) + 1)
+    train_smooth = _moving_average(train_accuracies, window=smoothing_window)
+    val_smooth = _moving_average(val_accuracies, window=smoothing_window)
+
     plt.figure(figsize=(8, 5))
-    plt.plot(epochs, train_accuracies, label="Train Accuracy", color="#1f77b4", linewidth=2, linestyle="-")
-    plt.plot(epochs, val_accuracies, label="Validation Accuracy", color="#ff7f0e", linewidth=2, linestyle="-")
-    # Đánh dấu vùng overlap (nếu muốn, có thể thêm fill_between)
+    plt.plot(epochs, train_accuracies, label="Train Acc", color="#1f77b4", linewidth=1, alpha=0.4)
+    plt.plot(epochs, val_accuracies, label="Validation Acc", color="#ff7f0e", linewidth=1, alpha=0.4)
+    plt.plot(epochs, train_smooth, label=f"Train Acc (smoothed {smoothing_window})", color="#1f77b4", linewidth=2)
+    plt.plot(epochs, val_smooth, label=f"Validation Acc (smoothed {smoothing_window})", color="#ff7f0e", linewidth=2)
     plt.xlabel("Epoch")
     plt.ylabel("Accuracy")
     plt.title("Train vs Validation Accuracy")
@@ -219,6 +238,8 @@ def main(
         parser.add_argument("--num-workers", type=int, default=0)
         parser.add_argument("--seed", type=int, default=42)
         parser.add_argument("--accuracy-threshold", type=float, default=0.5)
+        parser.add_argument("--smoothing-window", type=int, default=5,
+            help="Moving average window for plot smoothing (1 = no smoothing)")
         args = parser.parse_args()
     set_seed(args.seed)
 
@@ -305,7 +326,7 @@ def main(
         val_accuracies.append(val_accuracy)
 
         print(
-            f"Epoch {epoch:03d} | Train MSE: {train_loss:.6f} | Val MSE: {val_loss:.6f} "
+            f"Epoch {epoch:03d} | Train MAE: {train_loss:.6f} | Val MAE: {val_loss:.6f} "
             f"| Train Acc: {train_accuracy:.6f} | Val Acc: {val_accuracy:.6f}"
         )
 
@@ -346,8 +367,18 @@ def main(
             print(f"Early stopping at epoch {epoch} (patience={args.patience}).")
             break
 
-    save_loss_plot(train_losses, val_losses, ROOT_DIR / "plots" / "training_loss.png")
-    save_accuracy_plot(train_accuracies, val_accuracies, ROOT_DIR / "plots" / "training_accuracy.png")
+    save_loss_plot(
+        train_losses,
+        val_losses,
+        ROOT_DIR / "plots" / "training_loss.png",
+        smoothing_window=args.smoothing_window,
+    )
+    save_accuracy_plot(
+        train_accuracies,
+        val_accuracies,
+        ROOT_DIR / "plots" / "training_accuracy.png",
+        smoothing_window=args.smoothing_window,
+    )
 
     train_summary = {
         "num_samples": {
