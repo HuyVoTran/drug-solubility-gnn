@@ -43,16 +43,16 @@ from drug_solubility_gnn.model import GATRegressor  # noqa: E402
 
 def get_args_colab(
     data_path="curated-solubility-dataset.csv",
-    epochs=150,
-    learning_rate=1.5e-3,
-    weight_decay=2e-4,
+    epochs=170,
+    learning_rate=1.3e-3,
+    weight_decay=3e-4,
     batch_size=128,
     hidden_dim=96,
     num_layers=3,
     heads=4,
-    dropout=0.15,
-    patience=25,
-    min_epochs_before_stop=120,
+    dropout=0.18,
+    patience=30,
+    min_epochs_before_stop=135,
     num_workers=0,
     seed=42,
     accuracy_threshold=0.5,
@@ -189,16 +189,16 @@ def main(
     if IS_COLAB:
         args = get_args_colab(
             data_path=data_path or "curated-solubility-dataset.csv",
-            epochs=epochs or 150,
-            learning_rate=learning_rate or 1.5e-3,
-            weight_decay=weight_decay or 2e-4,
+            epochs=epochs or 170,
+            learning_rate=learning_rate or 1.3e-3,
+            weight_decay=weight_decay or 3e-4,
             batch_size=batch_size or 128,
             hidden_dim=hidden_dim or 96,
             num_layers=num_layers or 3,
             heads=heads or 4,
-            dropout=dropout or 0.15,
-            patience=patience or 25,
-            min_epochs_before_stop=min_epochs_before_stop or 120,
+            dropout=dropout or 0.18,
+            patience=patience or 30,
+            min_epochs_before_stop=min_epochs_before_stop or 135,
             num_workers=num_workers or 0,
             seed=seed or 42,
             accuracy_threshold=accuracy_threshold or 0.5,
@@ -206,16 +206,16 @@ def main(
     else:
         parser = argparse.ArgumentParser(description="Train GAT model for aqueous solubility prediction")
         parser.add_argument("--data-path", type=str, default=str(ROOT_DIR / "curated-solubility-dataset.csv"))
-        parser.add_argument("--epochs", type=int, default=150)
-        parser.add_argument("--learning-rate", type=float, default=1.5e-3)
-        parser.add_argument("--weight-decay", type=float, default=2e-4)
+        parser.add_argument("--epochs", type=int, default=170)
+        parser.add_argument("--learning-rate", type=float, default=1.3e-3)
+        parser.add_argument("--weight-decay", type=float, default=3e-4)
         parser.add_argument("--batch-size", type=int, default=128)
         parser.add_argument("--hidden-dim", type=int, default=96)
         parser.add_argument("--num-layers", type=int, default=3)
         parser.add_argument("--heads", type=int, default=4)
-        parser.add_argument("--dropout", type=float, default=0.15)
-        parser.add_argument("--patience", type=int, default=25)
-        parser.add_argument("--min-epochs-before-stop", type=int, default=120)
+        parser.add_argument("--dropout", type=float, default=0.18)
+        parser.add_argument("--patience", type=int, default=30)
+        parser.add_argument("--min-epochs-before-stop", type=int, default=135)
         parser.add_argument("--num-workers", type=int, default=0)
         parser.add_argument("--seed", type=int, default=42)
         parser.add_argument("--accuracy-threshold", type=float, default=0.5)
@@ -261,7 +261,7 @@ def main(
     ).to(device)
 
     optimizer = Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
-    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=3, min_lr=1e-5)
+    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.4, patience=2, cooldown=2, min_lr=1e-6)
     criterion = nn.L1Loss()
 
     best_val_loss = float("inf")
